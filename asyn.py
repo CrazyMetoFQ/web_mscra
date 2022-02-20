@@ -8,14 +8,38 @@ import os
 
 import time
 import json
+from shutil import rmtree
 
 from bs4 import BeautifulSoup
 
+import img2pdf
+
+
+
+def daLeter(path):
+  """
+  makes path without error, deletes prev
+  
+  nice for formality of path check
+  """
+
+  if not os.path.isdir(path):
+    os.mkdir(path)
+  else:
+    rmtree(path)
+    os.mkdir(path)
 
 
 def update_json(path, data):
+  """
+  updates a json file with info  
+  """
+
   with open(path, "w+") as fm:
-    p = json.load(fm)
+    if fm.read():
+      p = json.load(fm)
+    else:
+      p = dict()
 
     with open(path, "w") as fc:
       p.update(data)
@@ -23,7 +47,7 @@ def update_json(path, data):
 
 
 
-async def get_urls(urls, log_name= "urls"):
+async def get_urls(urls, log_path= "urls.json"):
   """
   urls -> list of links
   returns response, ok, content of urls.
@@ -47,19 +71,18 @@ async def get_urls(urls, log_name= "urls"):
     end = time.time()
     total_time = end - start
 
-    update_json(f"{log_name}_log.json",
+    update_json(log_path,
                 {"time":total_time, "lenght": len(urls)})
-
-    # print("It took {} seconds to make {} calls".format(round(total_time, round_to),len(urls)))
     
     return urls_result
 
 
 
-def find_imgs(cnt , base_link, ky = "src",img_args=[None,None,None]):
+def find_imgs(cnt , base_link, log_path,ky = "src",img_args=[None,None,None]):
   """
   cnt -> html
   base_link -> is da base_link
+  log_path -> path to log file with extension
 
   ky -> str, what is the key for src for imgs
   img args: strt, stp, stp -> int 
@@ -72,41 +95,47 @@ def find_imgs(cnt , base_link, ky = "src",img_args=[None,None,None]):
   soup = BeautifulSoup(cnt, 'lxml')
   img_list = list(soup.findAll('img'))
 
-  update_json("img_find_log.txt",
-              {"img_list": img_list,
+  # updates da log
+  update_json(log_path,
+              {"img_list": str(img_list),
                "ky":ky,
                "img_args": img_args}
-               )
+               ) 
 
 
   def im_clean(im_, ky_):
-      try:
-        si = im_[ky_]
-        si.replace("\n","")
-        si.replace("\t","")
+    """
+    just a function to clean the urls
+    """
 
-        if "." not in si[:-7] and "/" == si[0]:
-          si = base_link + si
-        else:pass
+    try:
+      si = im_[ky_]
+      si.replace("\n","")
+      si.replace("\t","")
 
-        if "http" not in si:
-          si = "http:" + si
-        else:pass
+      if "." not in si[:-7] and "/" == si[0]:
+        si = base_link + si
+      else:pass
 
-        if "w3.org" not in si:
-          pass
-        else:
-          raise Exception("error")
+      if "http" not in si:
+        si = "http:" + si
+      else:pass
 
-        return si
-
-      except:
+      if "w3.org" not in si:
+        pass
+      else:
         raise Exception("error")
+
+      return si
+
+    except:
+      raise Exception("error")
 
 
   imli = []
   errors_log = {"src invalid":{}}
   for sno,im in enumerate(img_list[img_args[0]:img_args[1]:img_args[2]]):
+    
     try:
 
       si = im_clean(im, ky)
@@ -115,7 +144,7 @@ def find_imgs(cnt , base_link, ky = "src",img_args=[None,None,None]):
     except:
       
       errors_log["src invalid"][sno] = ky
-      update_json("img_find_log.json", errors_log)
+      update_json(log_path, errors_log)
             
 
       try:
@@ -124,16 +153,65 @@ def find_imgs(cnt , base_link, ky = "src",img_args=[None,None,None]):
         imli.append(si)
 
       except:
-        update_json("img_find_log.json", {sno:[im, ky, type(im), im[ky]]})
+        update_json(log_path, {sno:[im, ky, str(type(im)), im[ky]]})
         
 
   end = time.time()
   total_time = end - start
 
-  update_json(f"img_find_log.json",
+  update_json(log_path,
               {"time":total_time, "lenght": len(imli)})
 
   return imli
+
+
+
+def converr(imgs, path, save_as = "pdf"):
+  """
+  imgs -> list of binary imgs
+  path - > str of path to files
+  save_as --> image or pdf 
+  """
+  start = time.time()  
+
+  if save_as == "pdf":
+    file_format = ".pdf"
+  elif save_as == "img":
+    file_format = ".jpg"
+  else:
+    raise Exception("Incorrect file type")
+
+  # pdf
+  if save_as == "pdf":
+    with open(f"{path}{file_format}",'wb') as f:
+      try:
+        f.write(img2pdf.convert(imgs))
+      
+      except:
+        raise Exception("eror") # got tp log this not raise later 
+
+    end = time.time()
+    total_time = end - start
+    print("It took {} seconds to write a {} page pdf".format(total_time,len(imgs)))
+  
+  # Images
+  elif save_as == "img":
+
+    os.mkdir(path)
+
+    for sno,img in enumerate(imgs):
+      
+      with open(f"{path}/img{sno}{file_format}",'wb') as f:
+        try:
+          f.write(img)
+        
+        except Exception() as e:
+          print(e)
+
+    end = time.time()
+    total_time = end - start
+    print("It took {} seconds to write {} images".format(total_time,len(imgs)))
+
 
 
 
@@ -144,45 +222,41 @@ def main_func(urls, path, base_link, save_as = "pdf", ky = 'src', img_args =[Non
   """
 
 
-  start = time.time()  
+  start = time.time()
 
-  pg_d = asyncio.run(get_urls(urls, "1")) # pages to find the imgs
-  all_imgs = [find_imgs(cnt, base_link,ky, img_args) for cnt in pg_d["content"]] # all image links in nested list
+  log_path = "/content/logs"
+  daLeter(log_path) # creates dir for all the logs
+  daLeter(f"{log_path}/find_imgs") # creates log dir for the image finder
+  daLeter(f"{log_path}/converter") # creates log dir for the converter
+  daLeter(f"{log_path}/pages") # creates log dir for the chapters
+  daLeter(f"{log_path}/creation") # creates log dir for the current going
+  
+  pg_d = asyncio.run(get_urls(urls, f"{log_path}/intial get.json")) # pages to find the imgs
+  all_imgs = [find_imgs(cnt, base_link, f"{log_path}/find_imgs/page_{sno}.json",ky, img_args) for sno,cnt in enumerate(pg_d["content"])] # all image links in nested list
 
+  # want to make this async
+  def supa_main(sno_, imgs_):
+    """
+    the main worker
+    """
+    update_json(f"{log_path}/creation/getting.json", {"current":sno_})
+    img_d = asyncio.run(get_urls(imgs_, f"{log_path}/pages/page {sno_}.json")) # dict of images, contains binary
 
+    update_json(f"{log_path}/creation/making.json", {"current":sno_})
+    converr(img_d["content"],f"{path}/ch_{sno_}", save_as)
+  
   for sno,imgs in enumerate(all_imgs, start = 1):
+    supa_main(sno,imgs)
     
+      
 
-    print(f"getting ch {sno}")
-    img_d = asyncio.run(get_urls(imgs, round_to,debug_ = debug__)) # dict of images, contains binary
-
-
-    # print(f"making ch {sno}")
-    # converr(img_d["content"],f"{path}/ch_{sno}", save_info[0], save_info[1],round_to)
-    # print("------------------\n")
 
 
   end = time.time()
   total_time = end - start
-  print("It took {} seconds to make {} chapters.".format(round(total_time, round_to),len(urls)))
+
+
+  update_json(f"{log_path}/main.json",
+            {"time":total_time, "lenght": len(urls)})
 
   return "ho"
-
-
-inp = input("url")
-main_func([inp.format(i) for i in range(1,3)], "/content/tri", input("base link"))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
